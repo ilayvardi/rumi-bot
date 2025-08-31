@@ -3,16 +3,18 @@ from discord import app_commands
 from datetime import datetime, timedelta
 from typing import List
 import asyncio
-from groq import Groq
 import os
 
-# Import personality
+# Import personality and new modules
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from personality import RUMI_PERSONALITY
+from ai_client import AIClient
+from context_manager import ContextManager
 
-# Initialize Groq client
-groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+# Initialize AI client and context manager
+ai_client = AIClient()
+context_manager = ContextManager()
 
 class SummaryCommand(app_commands.Command):
     def __init__(self):
@@ -70,12 +72,16 @@ class SummaryCommand(app_commands.Command):
             await interaction.followup.send(f"No messages found in the {summary_context}.")
             return
         
-        # Get summary from Groq
+        # Get enhanced summary with context
         try:
             # Calculate stats
             total_words = sum(len(msg.split()) for msg in messages)
             
-            summary = await self.get_summary(messages, summary_context)
+            # Messages are now stored automatically via on_message handler
+            # No need to manually store them here
+            
+            summary = await self.get_summary(messages, summary_context, 
+                                           str(interaction.guild_id), str(channel.id))
             summary_words = len(summary.split())
             
             # Add stats header
@@ -165,70 +171,22 @@ class SummaryCommand(app_commands.Command):
         # Reverse to get chronological order
         return list(reversed(messages))
     
-    async def get_summary(self, messages: List[str], context: str) -> str:
-        """Get summary from Groq using llama maverick"""
-        # Join all messages
-        chat_log = "\n".join(messages)
+    async def get_summary(self, messages: List[str], context: str, guild_id: str, channel_id: str) -> str:
+        """Get enhanced summary with context awareness"""
+        # Get previous conversation context
+        previous_context = await context_manager.get_conversation_context(guild_id, channel_id)
         
-        # PRE-CONTEXT: High-level expectations
-        pre_context = f"""You're summarizing a Discord conversation from the {context}.
-This is a high-level intellectual friend group that discusses complex technical, philosophical, and scientific topics.
-They're brilliant AND hilarious - capture both the genius and the chaos.
-
-IMPORTANT: ADAPT YOUR RESPONSE TO THE ACTUAL CONTENT!
-- If it's deep philosophical discussion → detailed technical analysis
-- If it's shitposting and spam → acknowledge the absurdity with humor
-- If it's mixed → capture both aspects
-- If nothing happened → be brief and witty about the void
-
-The following structure is a GUIDE, not a rigid template:
-• The Vibe (always include)
-• Core Ideas (IF there were actual ideas discussed)
-• Arguments (IF there were debates)
-• Brilliant Moments (IF someone said something clever)
-• Comedy Gold (IF there was humor)
-• Social Dynamics (IF interesting interpersonal stuff happened)
-• Open Questions (IF there are unresolved topics)
-• Resources (IF any were shared)
-
-BE CREATIVE with your format based on what actually happened:
-- Dense technical discussion? → Focus on the ideas
-- Chaos and jokes? → Lean into the humor
-- Someone spamming "bla"? → Don't force 8 sections of analysis on nothing
-
-Write naturally, match the energy of what actually happened."""
-
-        # POST-CONTEXT: After seeing the actual messages
-        post_context = """Based on the actual conversation above:
-- PRESERVE TECHNICAL ACCURACY - use exact terminology, don't dumb down complex ideas
-- Include enough detail that someone could continue the conversation intelligently
-- Note when someone makes a particularly clever point or connection
-- Capture the interpersonal subtext (tensions, alliances, intellectual sparring, roasting)
-- If someone shares research/theory, explain what it actually says
-- Quote verbatim when someone says something brilliant OR hilarious
-- Show how jokes and humor advance or derail the intellectual discussion
-- Preserve dark humor, absurdist takes, and intellectual shitposting
-- Show how ideas evolved through the discussion, not just end state"""
-
-        # Build the full prompt
-        user_prompt = f"""{pre_context}
-
-[CONVERSATION LOGS START]
-{chat_log}
-[CONVERSATION LOGS END]
-
-{post_context}"""
-        
-        # Call Groq API with Llama Maverick
-        response = await asyncio.to_thread(
-            groq_client.chat.completions.create,
-            model="meta-llama/llama-4-maverick-17b-128e-instruct",
-            messages=[
-                {"role": "system", "content": RUMI_PERSONALITY},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=1.0
-            # No max_tokens limit as requested
+        # Generate summary using AI client
+        summary = await ai_client.summarize_conversation(
+            messages, context, RUMI_PERSONALITY, previous_context
         )
         
-        return response.choices[0].message.content
+        # Store this summary for future context
+        if messages:
+            start_time = datetime.utcnow() - timedelta(days=2)  # Approximate
+            end_time = datetime.utcnow()
+            await context_manager.store_summary(
+                guild_id, channel_id, summary, len(messages), start_time, end_time
+            )
+        
+        return summary
