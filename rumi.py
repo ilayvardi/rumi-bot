@@ -11,6 +11,8 @@ load_dotenv()
 from commands.summary import SummaryCommand
 from commands.memory import MemoryCommand
 from commands.database import DatabaseCommand
+from commands.chat import ChatCommand
+from commands.ruminate import RuminateCommand
 from context_manager import ContextManager
 from ai_client import AIClient
 
@@ -32,6 +34,8 @@ class Rumi(discord.Client):
         self.tree.add_command(SummaryCommand())
         self.tree.add_command(MemoryCommand())
         self.tree.add_command(DatabaseCommand())
+        self.tree.add_command(ChatCommand())
+        self.tree.add_command(RuminateCommand())
         
         # Sync commands (use guild for faster testing if GUILD_ID is set)
         guild_id = os.getenv("GUILD_ID")
